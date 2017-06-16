@@ -3,6 +3,9 @@ const THREE = require('three');
 const EventEmitter = require('events').EventEmitter;
 const get = require('./get');
 
+let pathObject;
+let pathMat;
+
 function interfaceUser() {
   const uiRenderer = new EventEmitter();
 
@@ -79,43 +82,57 @@ function interfaceUser() {
 
   // Add an object in the scene
 
-  get('/data/path.csv').then((data) => {
-    const lines = data.split('\n');
-    const dataLines = lines.slice(1);
-    const scaler = scale => ({ x, y }) => ({
-      x: x * scale,
-      y: y * scale,
-    });
-    const translator = (dx, dy) => ({ x, y }) => ({
-      x: x + dx,
-      y: y + dy,
-    });
+  const vertShaderPromise = get('/shaders/path.vert');
+  const fragShaderPromise = get('/shaders/path.frag');
 
-    const points = dataLines
-      .map(line => line.split(','))
-      .map(([x, y]) => ({ x: parseFloat(x), y: parseFloat(y) }))
-      .map(translator(-300, -300))
-      .map(scaler(0.01));
+  Promise.all([get('/data/path.csv'), vertShaderPromise, fragShaderPromise])
+    .then(([data, vertShader, fragShader]) => {
+      const lines = data.split('\n');
+      const dataLines = lines.slice(1);
+      const scaler = scale => ({ x, y }) => ({
+        x: x * scale,
+        y: y * scale,
+      });
+      const translator = (dx, dy) => ({ x, y }) => ({
+        x: x + dx,
+        y: y + dy,
+      });
 
-    const lineMat = new THREE.LineBasicMaterial({ color: 0x0000ff });
+      const points = dataLines
+        .map(line => line.split(','))
+        .map(([x, y]) => ({ x: parseFloat(x), y: parseFloat(y) }))
+        .map(translator(-300, -300))
+        .map(scaler(0.01));
 
-    for (let i = 0; i < points.length - 1; i++) {
-      const { x: x1, y: y1 } = points[i];
-      const { x: x2, y: y2 } = points[i + 1];
+      // const lineMat = new THREE.LineBasicMaterial({ color: 0x0000ff });
+
+      pathMat = new THREE.ShaderMaterial({
+        vertexShader: vertShader,
+        fragmentShader: fragShader,
+        blending: THREE.AdditiveBlending,
+        depthTest: false,
+        transparent: true,
+      });
 
       const lineGeom = new THREE.Geometry();
 
-      lineGeom.vertices.push(
-        new THREE.Vector3(x1, 0, y1),
-        new THREE.Vector3(x2, 0, y2)
-      );
+      points.forEach(({ x, y }) =>
+        lineGeom.vertices.push(new THREE.Vector3(x, 0, y)));
 
-      const line = new THREE.Line(lineGeom, lineMat);
-      markerRoot.add(line);
-    }
+      const bufferGeometry = new THREE.BufferGeometry();
 
-    console.log('Path loaded!');
-  });
+      const vertices = lineGeom.vertices;
+      const position = new THREE.Float32BufferAttribute(vertices.length * 3, 3).copyVector3sArray(vertices);
+      bufferGeometry.addAttribute('position', position);
+
+      const displacement = new THREE.Float32BufferAttribute(vertices.length * 3, 3);
+      bufferGeometry.addAttribute('displacement', displacement);
+
+      pathObject = new THREE.Line(bufferGeometry, pathMat);
+      markerRoot.add(pathObject);
+
+      console.log('Path loaded!');
+    });
 
   // Render the whole thing on the page
 
@@ -124,14 +141,29 @@ function interfaceUser() {
   // Run the rendering loop
 
   let lastTimeMsec = null;
+  let time = 0;
 
   function animate(nowMsec) {
+    if (pathObject) {
+      // pathMat.uniforms.time.value = time;
+
+      const array = pathObject.geometry.attributes.displacement.array;
+      for (let i = 0; i < array.length; i += 3) {
+        // array[i] = 0.1 * (0.5 - Math.random());
+        array[i + 1] = 0.3 * (1 + Math.sin(Date.now() / 1000 + 0.2 * 2 * Math.PI * i / array.length));
+        // array[i + 2] = 0.1 * (0.5 - Math.random());
+      }
+
+      pathObject.geometry.attributes.displacement.needsUpdate = true;
+    }
+
     // keep looping
     requestAnimationFrame(animate);
     // measure time
     lastTimeMsec = lastTimeMsec || nowMsec - (1000 / 60);
     const deltaMsec = Math.min(200, nowMsec - lastTimeMsec);
     lastTimeMsec = nowMsec;
+    time += lastTimeMsec;
 
     uiRenderer.emit('render', deltaMsec / 1000, nowMsec / 1000);
   }

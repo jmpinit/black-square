@@ -1,3 +1,3 @@
-![](http://i.imgur.com/K2HRh0m.gif)
+![](http://i.imgur.com/lLXzinQ.gif)
 
 [Video](https://vimeo.com/221988177).
